@@ -1,0 +1,36 @@
+{
+  "id": "reader-digest",
+  "version": "0.1.0",
+  "name": "Reader Digest",
+  "description": "Queue links and local Markdown, then build, QA, and optionally email EPUB reading digests.",
+  "kind": "tooling",
+  "activation": {
+    "onStartup": false
+  },
+  "contracts": {
+    "skills": [
+      "reader-digest"
+    ],
+    "commands": [
+      "reader-digest"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Optional SQLite database path."
+      },
+      "storageMode": {
+        "type": "string",
+        "enum": ["plugin-sqlite", "external-sqlite", "manifest-only"],
+        "description": "Where queue and digest state is stored."
+      },
+      "workspace": {
+        "type": "string",
+        "description": "Directory where digest bundles and manifests are written."
+      }
+    }
+  }
+}

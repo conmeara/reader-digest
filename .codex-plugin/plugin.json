@@ -1,0 +1,43 @@
+{
+  "name": "reader-digest",
+  "version": "0.1.0",
+  "description": "Build, QA, and optionally email local EPUB reading digests from queued links and Markdown.",
+  "author": {
+    "name": "Conor O'Meara",
+    "url": "https://github.com/conmeara"
+  },
+  "homepage": "https://clawhub.ai",
+  "repository": "https://github.com/conmeara/reader-digest",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "codex",
+    "epub",
+    "kindle",
+    "reader",
+    "digest"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Reader Digest",
+    "shortDescription": "Queue links and build EPUB reading bundles.",
+    "longDescription": "A local-first OpenClaw plugin for turning queued URLs, local Markdown files, and optional flagged newsletters into EPUB reader digests. It can store queue state in its own SQLite database, use a compatible external SQLite database, or operate from manifest files only. Email delivery is optional and never runs without explicit confirmation.",
+    "developerName": "Conor O'Meara",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Local",
+      "Email"
+    ],
+    "websiteURL": "https://clawhub.ai",
+    "privacyPolicyURL": "https://clawhub.ai",
+    "termsOfServiceURL": "https://clawhub.ai",
+    "defaultPrompt": [
+      "Add this article to my next reader digest.",
+      "Prepare today's EPUB reading digest.",
+      "Run QA on the latest reader digest EPUB."
+    ],
+    "brandColor": "#2F6F58"
+  }
+}

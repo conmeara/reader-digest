@@ -120,6 +120,11 @@ def existing_tables(con: sqlite3.Connection) -> set[str]:
     return {row[0] for row in rows}
 
 
+def table_columns(con: sqlite3.Connection, table: str) -> set[str]:
+    rows = con.execute(f"pragma table_info({table})").fetchall()
+    return {row["name"] for row in rows}
+
+
 def detect_storage(ctx: Context, con: sqlite3.Connection) -> str:
     if ctx.storage_mode != "external-sqlite":
         return ctx.storage_mode
@@ -245,7 +250,7 @@ def list_items(ctx: Context, digest_date: str | None) -> dict[str, Any]:
 
 
 def insert_personal_db(con: sqlite3.Connection, item: dict[str, Any]) -> None:
-    source_id = str(uuid.uuid4())
+    source_id = "src_reader_digest_plugin"
     entity_id = str(uuid.uuid4())
     metadata = {
         "queued_for_digest_date": item["digestDate"],
@@ -254,33 +259,127 @@ def insert_personal_db(con: sqlite3.Connection, item: dict[str, Any]) -> None:
         "source": item["source"],
         "plugin": "reader-digest",
     }
-    con.execute(
-        "insert into sources (id, source_type, source_ref, imported_at, metadata_json) values (?, ?, ?, ?, ?)",
-        (source_id, "reader-digest", item["url"], item["createdAt"], json.dumps(metadata)),
-    )
-    con.execute(
-        "insert into entities (id, type, title, canonical_url, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?)",
-        (entity_id, "article", item["title"], item["url"], item["createdAt"], item["createdAt"], json.dumps(metadata)),
-    )
-    con.execute(
-        "insert into library_items (id, entity_id, source_id, status, created_at, metadata_json) values (?, ?, ?, ?, ?, ?)",
-        (item["id"], entity_id, source_id, "queued", item["createdAt"], json.dumps(metadata)),
-    )
-    if "events" in existing_tables(con):
+    source_cols = table_columns(con, "sources")
+    entity_cols = table_columns(con, "entities")
+    library_cols = table_columns(con, "library_items")
+
+    if "metadata_json" in source_cols:
+        source_id = str(uuid.uuid4())
         con.execute(
-            "insert into events (id, entity_id, event_type, occurred_at, metadata_json) values (?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), entity_id, "queued_for_digest", item["createdAt"], json.dumps(metadata)),
+            "insert into sources (id, source_type, source_ref, imported_at, metadata_json) values (?, ?, ?, ?, ?)",
+            (source_id, "reader-digest", item["url"], item["createdAt"], json.dumps(metadata)),
         )
+    else:
+        con.execute(
+            """
+            insert into sources (id, name, kind, metadata)
+            values (?, ?, ?, ?)
+            on conflict(name) do update set metadata = excluded.metadata
+            """,
+            (source_id, "Reader Digest Plugin", "reader_digest", json.dumps(metadata)),
+        )
+
+    if "canonical_url" in entity_cols:
+        con.execute(
+            "insert into entities (id, type, title, canonical_url, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?)",
+            (entity_id, "article", item["title"], item["url"], item["createdAt"], item["createdAt"], json.dumps(metadata)),
+        )
+    else:
+        con.execute(
+            """
+            insert into entities (id, type, canonical_key, title, url, metadata)
+            values (?, ?, ?, ?, ?, ?)
+            on conflict(type, canonical_key) do update set
+              title = excluded.title,
+              url = excluded.url,
+              metadata = excluded.metadata,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            """,
+            (entity_id, "library_item", item["url"], item["title"], item["url"], json.dumps(metadata)),
+        )
+        entity_id = con.execute(
+            "select id from entities where type = ? and canonical_key = ?",
+            ("library_item", item["url"]),
+        ).fetchone()["id"]
+
+    if "metadata_json" in library_cols:
+        con.execute(
+            "insert into library_items (id, entity_id, source_id, status, created_at, metadata_json) values (?, ?, ?, ?, ?, ?)",
+            (item["id"], entity_id, source_id, "queued", item["createdAt"], json.dumps(metadata)),
+        )
+    else:
+        con.execute(
+            """
+            insert into library_items
+            (id, entity_id, source_id, source_item_id, title, author, url, normalized_url, tags,
+             in_queue, favorited, read, highlight_count, last_interaction_at, content_file_id,
+             content_path, status, metadata)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(id) do update set
+              title = excluded.title,
+              url = excluded.url,
+              normalized_url = excluded.normalized_url,
+              in_queue = excluded.in_queue,
+              last_interaction_at = excluded.last_interaction_at,
+              content_file_id = excluded.content_file_id,
+              content_path = excluded.content_path,
+              status = excluded.status,
+              metadata = excluded.metadata,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            """,
+            (
+                item["id"],
+                entity_id,
+                source_id,
+                item["url"],
+                item["title"],
+                item.get("author"),
+                item["url"],
+                item["url"],
+                json.dumps(["digest-queue"]),
+                1,
+                0,
+                0,
+                0,
+                item["createdAt"],
+                Path(item["filePath"]).name if item.get("filePath") else None,
+                item.get("filePath"),
+                "queued_for_digest",
+                json.dumps(metadata),
+            ),
+        )
+    if "events" in existing_tables(con):
+        event_cols = table_columns(con, "events")
+        if "metadata_json" in event_cols:
+            con.execute(
+                "insert into events (id, entity_id, event_type, occurred_at, metadata_json) values (?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), entity_id, "queued_for_digest", item["createdAt"], json.dumps(metadata)),
+            )
+        else:
+            con.execute(
+                "insert into events (id, entity_id, source_id, type, occurred_at, metadata) values (?, ?, ?, ?, ?, ?)",
+                (str(uuid.uuid4()), entity_id, source_id, "queued_for_digest", item["createdAt"], json.dumps(metadata)),
+            )
 
 
 def read_personal_items(con: sqlite3.Connection, digest_date: str) -> list[dict[str, Any]]:
+    entity_cols = table_columns(con, "entities")
+    library_cols = table_columns(con, "library_items")
+    url_expr = "e.canonical_url" if "canonical_url" in entity_cols else "coalesce(li.url, e.url)"
+    created_expr = "li.created_at" if "created_at" in library_cols else "li.last_interaction_at"
+    metadata_expr = "li.metadata_json" if "metadata_json" in library_cols else "li.metadata"
+    status_filter = (
+        "li.status = 'queued'"
+        if "metadata_json" in library_cols
+        else "(li.status = 'queued_for_digest' or li.status = 'queued' or li.in_queue = 1)"
+    )
     rows = con.execute(
-        """
-        select li.id, e.title, e.canonical_url, li.created_at, li.metadata_json
+        f"""
+        select li.id, e.title, {url_expr} as url, {created_expr} as created_at, {metadata_expr} as metadata_json
         from library_items li
         join entities e on e.id = li.entity_id
-        where li.status = 'queued'
-        order by li.created_at, e.title
+        where {status_filter}
+        order by created_at, e.title
         """
     ).fetchall()
     items: list[dict[str, Any]] = []
@@ -291,8 +390,8 @@ def read_personal_items(con: sqlite3.Connection, digest_date: str) -> list[dict[
         items.append(
             {
                 "id": row["id"],
-                "url": row["canonical_url"],
-                "title": row["title"] or infer_title(row["canonical_url"]),
+                "url": row["url"],
+                "title": row["title"] or infer_title(row["url"]),
                 "author": None,
                 "filePath": metadata.get("file_path"),
                 "source": metadata.get("source"),
@@ -812,10 +911,27 @@ def record_digest_run(ctx: Context, digest_date: str, manifest: dict[str, Any], 
         if storage == "personal-db":
             if "digests" in existing_tables(con):
                 run_id = str(uuid.uuid4())
-                con.execute(
-                    "insert into digests (id, digest_date, title, manifest_path, epub_path, status, created_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (run_id, digest_date, manifest.get("title"), manifest_path, epub_path, status, now_iso(), json.dumps({"plugin": "reader-digest"})),
-                )
+                digest_cols = table_columns(con, "digests")
+                metadata = json.dumps({"plugin": "reader-digest", "manifest_path": manifest_path})
+                if "metadata_json" in digest_cols:
+                    con.execute(
+                        "insert into digests (id, digest_date, title, manifest_path, epub_path, status, created_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (run_id, digest_date, manifest.get("title"), manifest_path, epub_path, status, now_iso(), metadata),
+                    )
+                else:
+                    con.execute(
+                        """
+                        insert into digests (id, digest_date, title, status, epub_path, metadata, updated_at)
+                        values (?, ?, ?, ?, ?, ?, ?)
+                        on conflict(digest_date) do update set
+                          title = excluded.title,
+                          status = excluded.status,
+                          epub_path = excluded.epub_path,
+                          metadata = excluded.metadata,
+                          updated_at = excluded.updated_at
+                        """,
+                        (run_id, digest_date, manifest.get("title"), status, epub_path, metadata, now_iso()),
+                    )
         else:
             con.execute(
                 "insert into digest_runs (id, digest_date, title, manifest_path, epub_path, status, created_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?)",

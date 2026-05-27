@@ -136,6 +136,40 @@ class ReaderDigestCliTests(unittest.TestCase):
             built = subprocess.run(base + ["build", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
             self.assertTrue(Path(json.loads(built.stdout)["epubPath"]).exists())
 
+    def test_external_personal_db_schema_queue_prepare_build(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            db = tmp / "personal.sqlite"
+            con = sqlite3.connect(db)
+            con.executescript(
+                """
+                create table sources (id text primary key, name text not null unique, kind text not null, metadata text not null default '{}', created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+                create table entities (id text primary key, type text not null, canonical_key text not null, title text not null, subtitle text, url text, metadata text not null default '{}', created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')), unique (type, canonical_key));
+                create table library_items (id text primary key, entity_id text not null references entities(id), source_id text not null references sources(id), source_item_id text, title text not null, author text, publisher text, url text, normalized_url text, tags text not null default '[]', word_count integer, in_queue integer not null default 0, favorited integer not null default 0, read integer not null default 0, highlight_count integer not null default 0, last_interaction_at text, content_file_id text, content_path text, status text not null default 'imported', metadata text not null default '{}', created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+                create table digests (id text primary key, digest_date text not null unique, title text, status text not null default 'draft', epub_path text, sent_at text, qa_passed integer, metadata text not null default '{}', created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+                create table digest_items (digest_id text not null references digests(id), library_item_id text not null references library_items(id), position integer not null, chapter_path text, build_mode text, metadata text not null default '{}', primary key (digest_id, position));
+                """
+            )
+            con.close()
+            article = tmp / "podcast.md"
+            article.write_text("# Podcast Transcript\n\nFull transcript body.\n", encoding="utf-8")
+            base = [
+                sys.executable,
+                str(CLI),
+                "--workspace",
+                str(tmp),
+                "--db",
+                str(db),
+                "--storage-mode",
+                "external-sqlite",
+                "--json",
+            ]
+            subprocess.run(base + ["queue", "https://podcasts.example/episode", "--title", "Podcast Transcript", "--file", str(article), "--build-mode", "local", "--date", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
+            prepared = subprocess.run(base + ["prepare", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
+            self.assertEqual(json.loads(prepared.stdout)["status"], "prepared")
+            built = subprocess.run(base + ["build", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
+            self.assertTrue(Path(json.loads(built.stdout)["epubPath"]).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,20 @@ For direct chat /digest <url>:
 2. If queue succeeds, react with thumbs-up and send no text reply.
 3. If queue fails, send one concise error message.
 
+For podcast episodes or video essays, treat the link as an implicit digest request and use Peter Steinberger's summarize CLI/skill before queueing. The queued local file must be a polished reading article, not a raw transcript, timestamp dump, or speaker-turn notes. Prefer summarizing the episode URL directly; if source extraction is incomplete, use summarize --extract, transcript fallback, or local transcription only as source material for the article.
+
+Article capture sequence:
+
+1. Run summarize with a prompt that asks for a long-form Markdown article for Conor's Kindle digest.
+2. Save the article under the configured workspace content directory with a named Source link near the top.
+3. Queue the original episode URL with --file <article-path> and --build-mode local.
+4. Keep any raw transcript/audio as scratch evidence only; do not include it in the EPUB.
+5. Stay silent on success; alert Conor only when summarize/source capture fails or queueing fails.
+
+Recommended summarize prompt:
+
+    Convert this podcast/video/source material into a polished long-form reading article for Conor's Kindle digest. Write as an article, not a transcript and not bullet notes. Preserve the best ideas, examples, and arguments. Use a strong title, short dek, and clear section headings. Keep named source links only; do not include long bare URLs. Do not include Transcript sections or speaker turn formatting. Output clean Markdown only.
+
 Recommended command:
 
     scripts/reader_digest.py queue <url> --json
@@ -34,6 +48,8 @@ Use this sequence for manual or scheduled builds:
     scripts/reader_digest.py prepare YYYY-MM-DD --json
     scripts/reader_digest.py build YYYY-MM-DD --json
     scripts/reader_digest.py qa YYYY-MM-DD --json
+
+The EPUB metadata/title should be a short editorial headline based on the contents, followed by the date. Do not use a generic title like `Reader Digest - <date>` when there are queued items. Keep the output filename stable as `YYYY-MM-DD-reader-digest.epub`.
 
 Only after QA passes:
 

@@ -452,6 +452,7 @@ def prepare_digest(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
         )
     manifest = {
         "title": title,
+        "filename": kindle_epub_filename(title, digest_date),
         "date": digest_date,
         "buildMode": "mixed",
         "createdAt": now_iso(),
@@ -459,7 +460,7 @@ def prepare_digest(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     }
     path = bundle / "manifest.json"
     write_json(path, manifest)
-    return {"status": "prepared", "manifestPath": str(path), "itemCount": len(items), "title": title}
+    return {"status": "prepared", "manifestPath": str(path), "itemCount": len(items), "title": title, "filename": manifest["filename"]}
 
 
 def build_digest(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
@@ -469,7 +470,7 @@ def build_digest(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     manifest = read_json(manifest_path)
     dist = bundle / "dist"
     dist.mkdir(parents=True, exist_ok=True)
-    epub_path = dist / f"{digest_date}-reader-digest.epub"
+    epub_path = dist / (manifest.get("filename") or kindle_epub_filename(manifest.get("title"), digest_date))
     chapters = build_chapters(bundle, manifest)
     write_epub(epub_path, manifest, chapters)
     record_digest_run(ctx, digest_date, manifest, str(manifest_path), str(epub_path), "built")
@@ -670,7 +671,7 @@ def transparent_png() -> bytes:
 
 def qa_epub(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     digest_date = args.date or today_str()
-    epub_path = Path(args.epub).expanduser() if args.epub else bundle_dir(ctx, digest_date) / "dist" / f"{digest_date}-reader-digest.epub"
+    epub_path = Path(args.epub).expanduser() if args.epub else default_epub_path(ctx, digest_date)
     checks: list[dict[str, Any]] = []
     failures: list[str] = []
 
@@ -707,7 +708,7 @@ def qa_epub(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
 
 def send_digest(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     digest_date = args.date or today_str()
-    epub_path = Path(args.epub).expanduser() if args.epub else bundle_dir(ctx, digest_date) / "dist" / f"{digest_date}-reader-digest.epub"
+    epub_path = Path(args.epub).expanduser() if args.epub else default_epub_path(ctx, digest_date)
     recipient = args.to or ctx.config.get("kindleEmail") or os.environ.get("READER_DIGEST_KINDLE_EMAIL") or os.environ.get("KINDLE_EMAIL")
     if not args.confirm_send:
         return {"status": "not-sent", "reason": "missing --confirm-send", "epubPath": str(epub_path), "to": recipient}
@@ -890,6 +891,8 @@ def run_pipeline(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
         steps.append({"collect": collect_newsletters(ctx, ns)})
     prepared = prepare_digest(ctx, argparse.Namespace(date=digest_date, title=args.title))
     steps.append({"prepare": prepared})
+    if prepared.get("itemCount", 0) == 0:
+        return {"status": "skipped", "reason": "empty_queue", "steps": steps}
     built = build_digest(ctx, argparse.Namespace(date=digest_date, manifest=None))
     steps.append({"build": built})
     qa = qa_epub(ctx, argparse.Namespace(date=digest_date, epub=None))
@@ -972,6 +975,22 @@ def make_digest_title(items: list[dict[str, Any]], digest_date: str) -> str:
     return f"{', '.join(titles)} - {display_date}"
 
 
+def kindle_epub_filename(title: str | None, digest_date: str) -> str:
+    stem = re.sub(r"[^\x20-\x7E]+", "", title or "Reader Digest")
+    stem = stem.replace(",", "")
+    stem = re.sub(r'[\\/:*?"<>|]+', " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" .-_")
+    if not stem:
+        stem = "Reader Digest"
+    try:
+        year = datetime.strptime(digest_date, "%Y-%m-%d").strftime("%Y")
+    except ValueError:
+        year = ""
+    if year and year not in stem:
+        stem = f"{stem} {year}"
+    return f"{stem[:96].rstrip()}.epub"
+
+
 def short_title(title: str) -> str:
     return re.sub(r"\s+", " ", title).strip()[:42].rstrip()
 
@@ -991,6 +1010,17 @@ def slugify(value: str) -> str:
 
 def bundle_dir(ctx: Context, digest_date: str) -> Path:
     return ctx.workspace / "reading-bundles" / f"{digest_date}-kindle"
+
+
+def default_epub_path(ctx: Context, digest_date: str) -> Path:
+    bundle = bundle_dir(ctx, digest_date)
+    manifest_path = bundle / "manifest.json"
+    if manifest_path.exists():
+        manifest = read_json(manifest_path, {})
+        filename = manifest.get("filename") or kindle_epub_filename(manifest.get("title"), digest_date)
+    else:
+        filename = f"{digest_date}-reader-digest.epub"
+    return bundle / "dist" / filename
 
 
 def queue_manifest_path(ctx: Context, digest_date: str) -> Path:

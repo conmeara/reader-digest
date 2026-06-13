@@ -49,7 +49,7 @@ Use this sequence for manual or scheduled builds:
     scripts/reader_digest.py build YYYY-MM-DD --json
     scripts/reader_digest.py qa YYYY-MM-DD --json
 
-The EPUB metadata/title should be a short editorial headline based on the contents, followed by the date. Do not use a generic title like `Reader Digest - <date>` when there are queued items. Keep the output filename stable as `YYYY-MM-DD-reader-digest.epub`.
+The EPUB metadata/title should be a short editorial headline based on the contents, followed by the date. Do not use a generic title like `Reader Digest - <date>` when there are queued items. The output filename must match the editorial title because Kindle often surfaces the attachment filename more prominently than EPUB metadata, e.g. `Rick Rubin & AI Agents - May 26 2026.epub`.
 
 Only after QA passes:
 
@@ -60,6 +60,8 @@ For complete scheduled runs:
     scripts/reader_digest.py run YYYY-MM-DD --send --confirm-send --json
 
 Use --dry-run during setup or tests.
+
+If the run returns `{"status": "skipped", "reason": "empty_queue"}`, treat it as a successful quiet no-op. Do not notify the user, do not build or send an empty EPUB, and do not mark the scheduled job as failed.
 
 ## Optional Newsletter Collection
 

@@ -49,6 +49,8 @@ Prepare a manifest:
 
     reader-digest prepare 2026-05-26
 
+Prepared manifests set the EPUB filename from the editorial title because Kindle surfaces attachment filenames prominently. A digest titled `Rick Rubin & AI Agents - May 26, 2026` builds as `Rick Rubin & AI Agents - May 26 2026.epub`, not a machine slug.
+
 Build and QA:
 
     reader-digest build 2026-05-26
@@ -61,6 +63,12 @@ Send to Kindle after QA:
 Full run:
 
     reader-digest run 2026-05-26 --send --to your-kindle@example.com --confirm-send
+
+When a scheduled run has no queued items and no collected newsletter chapters, it exits as a quiet no-op:
+
+    {"status": "skipped", "reason": "empty_queue"}
+
+Treat that as success. Do not build or send an empty EPUB.
 
 Dry run delivery:
 

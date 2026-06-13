@@ -79,12 +79,15 @@ class ReaderDigestCliTests(unittest.TestCase):
             )
             prepared = self.payload(self.run_cli(tmp, "prepare", "2026-05-26"))
             self.assertEqual(prepared["status"], "prepared")
+            self.assertEqual(prepared["filename"], "Local Article - May 26 2026.epub")
             built = self.payload(self.run_cli(tmp, "build", "2026-05-26"))
             self.assertEqual(built["status"], "built")
             epub = Path(built["epubPath"])
             self.assertTrue(epub.exists())
+            self.assertEqual(epub.name, "Local Article - May 26 2026.epub")
             qa = self.payload(self.run_cli(tmp, "qa", "2026-05-26"))
             self.assertEqual(qa["status"], "passed", qa)
+            self.assertEqual(Path(qa["epubPath"]).name, "Local Article - May 26 2026.epub")
 
     def test_send_requires_confirmation_and_dry_run_suppresses_delivery(self):
         with tempfile.TemporaryDirectory() as td:
@@ -132,9 +135,22 @@ class ReaderDigestCliTests(unittest.TestCase):
             ]
             subprocess.run(base + ["queue", "https://example.com/m", "--title", "Manifest Only", "--file", str(article), "--build-mode", "local", "--date", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
             prepared = subprocess.run(base + ["prepare", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
-            self.assertEqual(json.loads(prepared.stdout)["status"], "prepared")
+            prepared_payload = json.loads(prepared.stdout)
+            self.assertEqual(prepared_payload["status"], "prepared")
+            self.assertEqual(prepared_payload["filename"], "Manifest Only - May 26 2026.epub")
             built = subprocess.run(base + ["build", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
-            self.assertTrue(Path(json.loads(built.stdout)["epubPath"]).exists())
+            epub = Path(json.loads(built.stdout)["epubPath"])
+            self.assertTrue(epub.exists())
+            self.assertEqual(epub.name, "Manifest Only - May 26 2026.epub")
+
+    def test_run_empty_queue_skips_without_building_epub(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            self.run_cli(tmp, "init")
+            result = self.payload(self.run_cli(tmp, "run", "2026-05-26"))
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "empty_queue")
+            self.assertFalse((tmp / "reading-bundles" / "2026-05-26-kindle" / "dist" / "2026-05-26-reader-digest.epub").exists())
 
     def test_external_personal_db_schema_queue_prepare_build(self):
         with tempfile.TemporaryDirectory() as td:
@@ -166,9 +182,13 @@ class ReaderDigestCliTests(unittest.TestCase):
             ]
             subprocess.run(base + ["queue", "https://podcasts.example/episode", "--title", "Podcast Transcript", "--file", str(article), "--build-mode", "local", "--date", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
             prepared = subprocess.run(base + ["prepare", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
-            self.assertEqual(json.loads(prepared.stdout)["status"], "prepared")
+            prepared_payload = json.loads(prepared.stdout)
+            self.assertEqual(prepared_payload["status"], "prepared")
+            self.assertEqual(prepared_payload["filename"], "Podcast Transcript - May 26 2026.epub")
             built = subprocess.run(base + ["build", "2026-05-26"], check=True, text=True, stdout=subprocess.PIPE)
-            self.assertTrue(Path(json.loads(built.stdout)["epubPath"]).exists())
+            epub = Path(json.loads(built.stdout)["epubPath"])
+            self.assertTrue(epub.exists())
+            self.assertEqual(epub.name, "Podcast Transcript - May 26 2026.epub")
 
 
 if __name__ == "__main__":

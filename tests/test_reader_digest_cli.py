@@ -89,6 +89,42 @@ class ReaderDigestCliTests(unittest.TestCase):
             self.assertEqual(qa["status"], "passed", qa)
             self.assertEqual(Path(qa["epubPath"]).name, "Local Article - May 26 2026.epub")
 
+    def test_build_rewrites_stale_date_based_manifest_filename(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            article = tmp / "article.md"
+            article.write_text("# Stale Filename\n\nBody.\n", encoding="utf-8")
+            self.run_cli(tmp, "init")
+            self.run_cli(tmp, "queue", "https://example.com/stale", "--title", "Stale Filename", "--file", str(article), "--build-mode", "local", "--date", "2026-05-26")
+            prepared = self.payload(self.run_cli(tmp, "prepare", "2026-05-26"))
+            manifest_path = Path(prepared["manifestPath"])
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["filename"] = "2026-05-26-reader-digest.epub"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            built = self.payload(self.run_cli(tmp, "build", "2026-05-26"))
+            self.assertEqual(Path(built["epubPath"]).name, "Stale Filename - May 26 2026.epub")
+            rewritten = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(rewritten["filename"], "Stale Filename - May 26 2026.epub")
+
+    def test_qa_rejects_date_based_attachment_filename_for_editorial_title(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            article = tmp / "article.md"
+            article.write_text("# Editorial Filename\n\nBody.\n", encoding="utf-8")
+            self.run_cli(tmp, "init")
+            self.run_cli(tmp, "queue", "https://example.com/editorial", "--title", "Editorial Filename", "--file", str(article), "--build-mode", "local", "--date", "2026-05-26")
+            self.run_cli(tmp, "prepare", "2026-05-26")
+            built = self.payload(self.run_cli(tmp, "build", "2026-05-26"))
+            source_epub = Path(built["epubPath"])
+            stale_epub = source_epub.with_name("2026-05-26-reader-digest.epub")
+            stale_epub.write_bytes(source_epub.read_bytes())
+
+            qa = self.payload(self.run_cli(tmp, "qa", "2026-05-26", "--epub", str(stale_epub), check=False))
+            self.assertEqual(qa["status"], "failed")
+            self.assertTrue(any(check["name"] == "filename-matches-manifest" and not check["ok"] for check in qa["checks"]))
+            self.assertTrue(any(check["name"] == "editorial-attachment-filename" and not check["ok"] for check in qa["checks"]))
+
     def test_send_requires_confirmation_and_dry_run_suppresses_delivery(self):
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)

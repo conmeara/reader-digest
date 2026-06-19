@@ -468,9 +468,11 @@ def build_digest(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     bundle = bundle_dir(ctx, digest_date)
     manifest_path = Path(args.manifest).expanduser() if args.manifest else bundle / "manifest.json"
     manifest = read_json(manifest_path)
+    manifest = canonicalize_manifest_filename(manifest, digest_date)
+    write_json(manifest_path, manifest)
     dist = bundle / "dist"
     dist.mkdir(parents=True, exist_ok=True)
-    epub_path = dist / (manifest.get("filename") or kindle_epub_filename(manifest.get("title"), digest_date))
+    epub_path = dist / manifest["filename"]
     chapters = build_chapters(bundle, manifest)
     write_epub(epub_path, manifest, chapters)
     record_digest_run(ctx, digest_date, manifest, str(manifest_path), str(epub_path), "built")
@@ -671,6 +673,8 @@ def transparent_png() -> bytes:
 
 def qa_epub(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     digest_date = args.date or today_str()
+    manifest_path = bundle_dir(ctx, digest_date) / "manifest.json"
+    manifest = read_json(manifest_path, {}) if manifest_path.exists() else {}
     epub_path = Path(args.epub).expanduser() if args.epub else default_epub_path(ctx, digest_date)
     checks: list[dict[str, Any]] = []
     failures: list[str] = []
@@ -683,6 +687,12 @@ def qa_epub(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
     check("exists", epub_path.exists(), str(epub_path))
     if not epub_path.exists():
         return {"status": "failed", "epubPath": str(epub_path), "checks": checks, "failures": failures}
+    expected_name = manifest.get("filename")
+    title = manifest.get("title") or ""
+    check("filename-matches-manifest", not expected_name or epub_path.name == expected_name, expected_name or "no manifest filename")
+    date_based_name = re.fullmatch(r"\d{4}-\d{2}-\d{2}-reader-digest\.epub", epub_path.name) is not None
+    generic_title = re.match(r"^(Reader )?Digest\s*-", title) is not None
+    check("editorial-attachment-filename", not (date_based_name and not generic_title), epub_path.name)
     try:
         with zipfile.ZipFile(epub_path) as zf:
             bad = zf.testzip()
@@ -989,6 +999,13 @@ def kindle_epub_filename(title: str | None, digest_date: str) -> str:
     if year and year not in stem:
         stem = f"{stem} {year}"
     return f"{stem[:96].rstrip()}.epub"
+
+
+def canonicalize_manifest_filename(manifest: dict[str, Any], digest_date: str) -> dict[str, Any]:
+    title = (manifest.get("title") or make_digest_title(manifest.get("items", []), digest_date)).strip()
+    manifest["title"] = title
+    manifest["filename"] = kindle_epub_filename(title, manifest.get("date") or digest_date)
+    return manifest
 
 
 def short_title(title: str) -> str:
